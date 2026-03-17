@@ -7,9 +7,6 @@
 import std from "tstl";
 
 declare namespace bws.packer {
-    namespace library {
-        class XML { [key: string]: any; }
-    }
     namespace protocol {
         interface IEntity {
             key(): any;
@@ -513,12 +510,9 @@ declare namespace bws.packer {
          * @param wrapperArray Type of Wrappers to be used.
          */
         constructor(instanceFormArray: InstanceFormArray, wrapperArray: WrapperArray);
-        construct(xml: library.XML): void;
         optimize(): WrapperArray;
         getInstanceFormArray(): InstanceFormArray;
         getWrapperArray(): WrapperArray;
-        TAG(): string;
-        toXML(): library.XML;
         toPacker(): Packer;
     }
     /**
@@ -531,9 +525,6 @@ declare namespace bws.packer {
          * Default Constructor.
          */
         constructor();
-        createChild(xml: library.XML): InstanceForm;
-        TAG(): string;
-        CHILD_TAG(): string;
         /**
          * Convert {@link InstanceForm} objects to {@link InstanceArray}.
          *
@@ -562,11 +553,6 @@ declare namespace bws.packer {
          * Default Constructor.
          */
         constructor(instance?: Instance, count?: number);
-        /**
-         * @inheritdoc
-         */
-        construct(xml: library.XML): void;
-        private createInstance(xml);
         key(): any;
         getInstance(): Instance;
         getCount(): number;
@@ -576,14 +562,6 @@ declare namespace bws.packer {
         $height: string;
         $length: string;
         $count: string;
-        /**
-         * @inheritdoc
-         */
-        TAG(): string;
-        /**
-         * @inheritdoc
-         */
-        toXML(): library.XML;
         /**
          * <p> Repeated {@link instance} to {@link InstanceArray}.
          *
@@ -604,10 +582,6 @@ declare namespace bws.packer {
          */
         constructor();
         /**
-         * @inheritdoc
-         */
-        createChild(xml: library.XML): Wrapper;
-        /**
          * Get (calculate) price.
          */
         getPrice(): number;
@@ -615,14 +589,6 @@ declare namespace bws.packer {
          * Get (calculate) utilization rate.
          */
         getUtilization(): number;
-        /**
-         * @inheritdoc
-         */
-        TAG(): string;
-        /**
-         * @inheritdoc
-         */
-        CHILD_TAG(): string;
     }
 }
 declare namespace bws.packer {
@@ -699,16 +665,6 @@ declare namespace bws.packer {
          * Set length, length on the Z-axis in 3D.
          */
         setLength(val: number): void;
-        /**
-         * <p> A type, identifier of derived class. </p>
-         *
-         * <h4> Derived types </h4>
-         * <ul>
-         *	<li> {@link Product product} </li>
-         *	<li> {@link Wrapper wrapper} </li>
-         * <ul>
-         */
-        TYPE(): string;
     }
 }
 declare namespace bws.packer {
@@ -722,18 +678,6 @@ declare namespace bws.packer {
          * Default Constructor.
          */
         constructor();
-        /**
-         * @inheritdoc
-         */
-        createChild(xml: library.XML): Instance;
-        /**
-         * @inheritdoc
-         */
-        TAG(): string;
-        /**
-         * @inheritdoc
-         */
-        CHILD_TAG(): string;
     }
 }
 declare namespace bws.packer {
@@ -776,10 +720,6 @@ declare namespace bws.packer {
          * @param instanceArray Instances to be packed into some wrappers.
          */
         constructor(wrapperArray: WrapperArray, instanceArray: InstanceArray);
-        /**
-         * @inheritdoc
-         */
-        construct(xml: library.XML): void;
         /**
          * Get wrapperArray.
          */
@@ -826,14 +766,6 @@ declare namespace bws.packer {
          * @return Re-packed wrappers.
          */
         protected repack($wrappers: WrapperArray): WrapperArray;
-        /**
-         * @inheritdoc
-         */
-        TAG(): string;
-        /**
-         * @inheritdoc
-         */
-        toXML(): library.XML;
     }
 }
 declare namespace bws.packer {
@@ -941,18 +873,6 @@ declare namespace bws.packer {
          * @param mode "all" | "yAxis" | "none"
          */
         setRotationMode(mode: "all" | "yAxis" | "none"): void;
-        /**
-         * @inheritdoc
-         */
-        TYPE(): string;
-        /**
-         * @inheritdoc
-         */
-        TAG(): string;
-        /**
-         * @inheritdoc
-         */
-        toXML(): library.XML;
     }
 }
 declare namespace bws.packer {
@@ -1020,10 +940,6 @@ declare namespace bws.packer {
          * @param orientation Placement orientation of wrapped {@link instance}.
          */
         constructor(wrapper: Wrapper, instance: Instance, x: number, y: number, z: number, orientation: number);
-        /**
-         * @inheritdoc
-         */
-        construct(xml: library.XML): void;
         /**
          * Factory method of wrapped Instance.
          *
@@ -1101,14 +1017,6 @@ declare namespace bws.packer {
         readonly $instanceName: string;
         readonly $layoutScale: string;
         readonly $position: string;
-        /**
-         * @inheritdoc
-         */
-        TAG(): string;
-        /**
-         * @inheritdoc
-         */
-        toXML(): library.XML;
     }
 }
 declare namespace bws.packer {
@@ -1148,6 +1056,13 @@ declare namespace bws.packer {
          */
         protected thickness: number;
         /**
+         * <p> Stable mode flag. </p>
+         *
+         * <p> When true, products' X-Z faces must not extend beyond the X-Z faces of the products below them
+         * (except at Y=0). This mode must be used with Y-axis rotation mode only. </p>
+         */
+        protected stableMode: boolean;
+        /**
          * Default Constructor.
          */
         constructor();
@@ -1167,9 +1082,17 @@ declare namespace bws.packer {
          */
         constructor(name: string, price: number, width: number, height: number, length: number, thickness: number);
         /**
-         * @inheritdoc
+         * Construct from members including stable mode.
+         *
+         * @param name Name, identifier of a Wrapper.
+         * @param price Price, issued cost for a type of the Wrapper.
+         * @param width Width, dimensional length on the X-axis in 3D.
+         * @param height Height, dimensional length on the Y-axis in 3D.
+         * @param length Length, dimensional length on the Z-axis in 3D.
+         * @param thickness A thickness causes shrinkness on containable volume.
+         * @param stableMode Whether stable mode is enabled.
          */
-        createChild(xml: library.XML): Wrap;
+        constructor(name: string, price: number, width: number, height: number, length: number, thickness: number, stableMode: boolean);
         /**
          * Key of a Wrapper is its name.
          */
@@ -1280,30 +1203,23 @@ declare namespace bws.packer {
          * Set thickness.
          */
         setThickness(val: number): void;
+        /**
+         * Get stable mode.
+         */
+        getStableMode(): boolean;
+        /**
+         * Set stable mode.
+         */
+        setStableMode(val: boolean): void;
         $name: string;
         $price: string;
         $width: string;
         $height: string;
         $length: string;
         $thickness: string;
+        $stableMode: string;
         readonly $scale: string;
         readonly $spaceUtilization: string;
-        /**
-         * @inheritdoc
-         */
-        TYPE(): string;
-        /**
-         * @inheritdoc
-         */
-        TAG(): string;
-        /**
-         * @inheritdoc
-         */
-        CHILD_TAG(): string;
-        /**
-         * @inheritdoc
-         */
-        toXML(): library.XML;
     }
 }
 declare namespace bws.packer {
@@ -1348,6 +1264,18 @@ declare namespace bws.packer {
          * @param thickness A thickness, causes shrinkness on containable volume, of the sample.
          */
         constructor(name: string, price: number, width: number, height: number, length: number, thickness: number);
+        /**
+         * Construct from members of the {@link sample} including stable mode.
+         *
+         * @param name Name, identifier of the sample.
+         * @param price Price, issued cost for a type of the sample.
+         * @param width Width, dimensional length on the X-axis in 3D, of the sample.
+         * @param height Height, dimensional length on the Y-axis in 3D, of the sample.
+         * @param length Length, dimensional length on the Z-axis in 3D, of the sample.
+         * @param thickness A thickness, causes shrinkness on containable volume, of the sample.
+         * @param stableMode Whether stable mode is enabled.
+         */
+        constructor(name: string, price: number, width: number, height: number, length: number, thickness: number, stableMode: boolean);
         /**
          * Key of a WrapperGroup is dependent on its sample.
          */
@@ -1420,10 +1348,6 @@ declare namespace bws.packer {
          * @see boxologic
          */
         private pack(instanceArray);
-        /**
-         * @inheritdoc
-         */
-        TAG(): string;
     }
 }
 
