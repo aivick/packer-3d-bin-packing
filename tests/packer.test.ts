@@ -726,6 +726,193 @@ describe("安定モード配置検証テスト", () => {
 // 特定サイズの梱包テスト
 // ─────────────────────────────────────
 
+// ─────────────────────────────────────
+// 回転処理の正確性テスト
+//
+// 3辺がすべて異なる非対称な製品を使い、
+// 正しい回転が行われなければ梱包不可となるケースで検証する。
+// ─────────────────────────────────────
+
+describe("回転処理の正確性テスト", () => {
+  /**
+   * yAxis 回転は「高さ(Y)固定・幅(X)と奥行き(Z)を入替」であるべき。
+   *
+   * 製品 W=5, H=20, L=30 を箱 W=30, H=25, L=10 に入れる。
+   * - 元の向き:     W=5,  H=20, L=30 → L=30 > 箱L=10 で入らない
+   * - 正しい yAxis: W=30, H=20, L=5  → 全辺が箱に収まる ✓
+   * - 誤った回転(width↔height): W=20, H=5, L=30 → L=30 > 箱L=10 で入らない ✗
+   */
+  it("yAxis: 高さ固定で幅と奥行きを入れ替えて梱包できる", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("箱", 1000, 30, 25, 10, 0));
+
+    const instances = new packer.InstanceArray();
+    const p = new packer.Product("非対称品", 5, 20, 30);
+    p.setRotationMode("yAxis");
+    instances.insert(instances.end(), 1, p);
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+    expect(result.size()).toBe(1);
+
+    const wrapper = result.at(0) as packer.Wrapper;
+    expect(wrapper.size()).toBe(1);
+
+    // 配置後の高さが元の H=20 のままであることを検証
+    const wrap = wrapper.at(0) as packer.Wrap;
+    expect(wrap.getLayoutHeight()).toBe(20);
+  });
+
+  /**
+   * yAxis + 安定モードで高さが変わらないことを検証。
+   *
+   * 製品 W=8, H=15, L=25 を安定箱 W=30, H=20, L=12 に入れる。
+   * - 元の向き:     W=8,  H=15, L=25 → L=25 > 箱L=12 で入らない
+   * - 正しい yAxis: W=25, H=15, L=8  → 全辺が箱に収まる ✓
+   * - 誤った回転:   W=15, H=8,  L=25 → L=25 > 箱L=12 で入らない ✗
+   */
+  it("yAxis + 安定モード: 高さ固定の回転で正しく梱包される", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("安定箱", 1000, 30, 20, 12, 0, true));
+
+    const instances = new packer.InstanceArray();
+    const p = new packer.Product("非対称品S", 8, 15, 25);
+    p.setRotationMode("yAxis");
+    instances.insert(instances.end(), 1, p);
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+    expect(result.size()).toBe(1);
+
+    const wrapper = result.at(0) as packer.Wrapper;
+    expect(wrapper.getStableMode()).toBe(true);
+    expect(wrapper.size()).toBe(1);
+
+    const wrap = wrapper.at(0) as packer.Wrap;
+    expect(wrap.getLayoutHeight()).toBe(15);
+  });
+
+  /**
+   * yAxis で複数個の非対称品を梱包し、すべての高さが保持されることを検証。
+   *
+   * 製品 W=6, H=12, L=20 を箱 W=25, H=30, L=10 に複数個入れる。
+   * - 元の向き:     W=6,  H=12, L=20 → L=20 > 箱L=10 で入らない
+   * - 正しい yAxis: W=20, H=12, L=6  → 箱に収まる ✓
+   */
+  it("yAxis: 複数個の非対称品すべてで高さが保持される", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("箱", 1000, 25, 30, 10, 0));
+
+    const instances = new packer.InstanceArray();
+    const p = new packer.Product("非対称品M", 6, 12, 20);
+    p.setRotationMode("yAxis");
+    instances.insert(instances.end(), 3, p);
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+    expect(result.size()).toBeGreaterThan(0);
+
+    let totalPacked = 0;
+    for (let wi = 0; wi < result.size(); wi++) {
+      const wrapper = result.at(wi) as packer.Wrapper;
+      for (let j = 0; j < wrapper.size(); j++) {
+        const wrap = wrapper.at(j) as packer.Wrap;
+        // yAxis 回転では高さは必ず元の H=12 のまま
+        expect(wrap.getLayoutHeight()).toBe(12);
+        totalPacked++;
+      }
+    }
+    expect(totalPacked).toBe(3);
+  });
+
+  /**
+   * all 回転で、6通りの向きのうち1通りでしか入らない製品を梱包できることを検証。
+   *
+   * 製品 W=3, H=25, L=10 を箱 W=12, H=5, L=30 に入れる。
+   * 箱に入る向きは (W=3, H=3の向き) → 具体的に:
+   *   向き (h=3, w=10, l=25): W=10≤12, H=3≤5, L=25≤30 ✓
+   * 3通りだけの生成では (3,25,10), (25,3,10), (10,25,3) となり、
+   * H≤5 を満たすのは (25,3,10) だが L=10≤30 かつ W=25>12 で ✗
+   * → 正しい6通りがないと入らない。
+   */
+  it("all: 6通りの全回転が必要な非対称品を梱包できる", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("扁平箱", 1000, 12, 5, 30, 0));
+
+    const instances = new packer.InstanceArray();
+    const p = new packer.Product("縦長品", 3, 25, 10);
+    p.setRotationMode("all");
+    instances.insert(instances.end(), 1, p);
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+    expect(result.size()).toBe(1);
+
+    const wrapper = result.at(0) as packer.Wrapper;
+    expect(wrapper.size()).toBe(1);
+
+    // 配置後のサイズが箱に収まっていることを検証
+    const wrap = wrapper.at(0) as packer.Wrap;
+    expect(wrap.getLayoutWidth()).toBeLessThanOrEqual(12);
+    expect(wrap.getLayoutHeight()).toBeLessThanOrEqual(5);
+    expect(wrap.getLength()).toBeLessThanOrEqual(30);
+  });
+
+  /**
+   * all 回転で非対称品が正しい向きで梱包されることを検証。
+   *
+   * 製品 W=4, H=30, L=9 を箱 W=10, H=6, L=35 に入れる。
+   * 6通り:
+   *   (4,30,9)  H=30>6 ✗
+   *   (4,9,30)  H=9>6 ✗
+   *   (30,4,9)  W=30>10 ✗
+   *   (30,9,4)  W=30>10 ✗
+   *   (9,4,30)  W=9≤10, H=4≤6, L=30≤35 ✓
+   *   (9,30,4)  H=30>6 ✗
+   * 旧バグ(3通り: (4,30,9), (30,4,9), (9,30,4)):
+   *   すべて ✗ → 入らない!
+   * 正しい6通りなら (9,4,30) で入る。
+   */
+  it("all: 旧バグの3通りでは入らないが6通りなら入る非対称品を梱包できる", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("扁平長箱", 1000, 10, 6, 35, 0));
+
+    const instances = new packer.InstanceArray();
+    const p = new packer.Product("非対称品X", 4, 30, 9);
+    p.setRotationMode("all");
+    instances.insert(instances.end(), 1, p);
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+    expect(result.size()).toBe(1);
+
+    const wrapper = result.at(0) as packer.Wrapper;
+    expect(wrapper.size()).toBe(1);
+
+    // 配置された向きが箱に収まっていることを検証
+    const wrap = wrapper.at(0) as packer.Wrap;
+    expect(wrap.getLayoutWidth()).toBeLessThanOrEqual(10);
+    expect(wrap.getLayoutHeight()).toBeLessThanOrEqual(6);
+    expect(wrap.getLength()).toBeLessThanOrEqual(35);
+  });
+
+  /**
+   * none モードでは回転が行われず、そのままの向きで配置されることを検証。
+   */
+  it("none: 回転なしで元の向きのまま配置される", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("箱", 1000, 30, 30, 30, 0));
+
+    const instances = new packer.InstanceArray();
+    const p = new packer.Product("固定品", 7, 13, 19);
+    p.setRotationMode("none");
+    instances.insert(instances.end(), 1, p);
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+    const wrapper = result.at(0) as packer.Wrapper;
+    const wrap = wrapper.at(0) as packer.Wrap;
+
+    expect(wrap.getLayoutWidth()).toBe(7);
+    expect(wrap.getLayoutHeight()).toBe(13);
+    expect(wrap.getLength()).toBe(19);
+  });
+});
+
 describe("特定サイズの梱包テスト", () => {
   it("290×225×230 の箱に 200×31×130 の製品を 14 個詰められる", () => {
     const wrappers: packer.WrapperArray = new packer.WrapperArray();
@@ -749,14 +936,253 @@ describe("特定サイズの梱包テスト", () => {
     instances.insert(instances.end(), 14, new packer.Product("製品", 200, 31, 130));
 
     const result = new packer.Packer(wrappers, instances).optimize();
-
-    let totalPacked = 0;
-    for (let i = 0; i < result.size(); i++) {
-      const w = result.at(i) as packer.Wrapper;
-      expect(w.getStableMode()).toBe(true);
-      totalPacked += w.size();
-    }
-    expect(totalPacked).toBe(14);
     expect(result.size()).toBe(1);
+
+    const usedWrapper = result.at(0) as packer.Wrapper;
+    expect(usedWrapper.getStableMode()).toBe(true);
+    expect(usedWrapper.size()).toBe(14);
+  });
+});
+
+// ─────────────────────────────────────
+// fillRates テスト
+// ─────────────────────────────────────
+
+describe("fillRates", () => {
+  it("optimize() の戻り値に fillRates プロパティが存在する", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("箱", 1000, 30, 30, 30, 0));
+
+    const instances = new packer.InstanceArray();
+    instances.insert(instances.end(), 1, new packer.Product("小物", 5, 5, 5));
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+    expect(result.fillRates).toBeDefined();
+    expect(Array.isArray(result.fillRates)).toBe(true);
+  });
+
+  it("fillRates の要素数が wrappers の数と一致する", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("箱", 1000, 30, 30, 30, 0));
+
+    const instances = new packer.InstanceArray();
+    instances.insert(instances.end(), 3, new packer.Product("小物", 5, 5, 5));
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+    expect(result.fillRates.length).toBe(result.size());
+  });
+
+  it("fillRates の各要素に必要なプロパティが含まれる", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("テスト箱", 1000, 20, 20, 20, 0));
+
+    const instances = new packer.InstanceArray();
+    instances.insert(instances.end(), 2, new packer.Product("品物", 10, 10, 10));
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+
+    for (const entry of result.fillRates) {
+      expect(entry).toHaveProperty("name");
+      expect(entry).toHaveProperty("fillRate");
+      expect(entry).toHaveProperty("packedVolume");
+      expect(entry).toHaveProperty("containableVolume");
+      expect(entry).toHaveProperty("packedCount");
+    }
+  });
+
+  it("fillRate が 0〜1 の範囲である", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("箱", 1000, 30, 30, 30, 0));
+
+    const instances = new packer.InstanceArray();
+    instances.insert(instances.end(), 5, new packer.Product("品物", 10, 10, 10));
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+
+    for (const entry of result.fillRates) {
+      expect(entry.fillRate).toBeGreaterThanOrEqual(0);
+      expect(entry.fillRate).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("name が対応する Wrapper の名前と一致する", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("大箱", 1000, 40, 40, 15, 0));
+
+    const instances = new packer.InstanceArray();
+    instances.insert(instances.end(), 3, new packer.Product("消しゴム", 1, 2, 5));
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+
+    for (let i = 0; i < result.size(); i++) {
+      const wrapper = result.at(i) as packer.Wrapper;
+      expect(result.fillRates[i].name).toBe(wrapper.getName());
+    }
+  });
+
+  it("packedCount が Wrapper 内のアイテム数と一致する", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("箱", 1000, 30, 30, 30, 0));
+
+    const instances = new packer.InstanceArray();
+    instances.insert(instances.end(), 4, new packer.Product("品物", 8, 8, 8));
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+
+    for (let i = 0; i < result.size(); i++) {
+      const wrapper = result.at(i) as packer.Wrapper;
+      expect(result.fillRates[i].packedCount).toBe(wrapper.size());
+    }
+  });
+
+  it("packedVolume が各アイテムの体積合計と一致する", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("箱", 1000, 30, 30, 30, 0));
+
+    const instances = new packer.InstanceArray();
+    instances.insert(instances.end(), 3, new packer.Product("品物", 10, 10, 10));
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+
+    for (let i = 0; i < result.size(); i++) {
+      const wrapper = result.at(i) as packer.Wrapper;
+      let expectedVolume = 0;
+      for (let j = 0; j < wrapper.size(); j++) {
+        expectedVolume += (wrapper.at(j) as packer.Wrap).getVolume();
+      }
+      expect(result.fillRates[i].packedVolume).toBeCloseTo(expectedVolume);
+    }
+  });
+
+  it("containableVolume が Wrapper の収容可能体積と一致する", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("厚箱", 1000, 20, 20, 20, 2));
+
+    const instances = new packer.InstanceArray();
+    instances.insert(instances.end(), 1, new packer.Product("小物", 5, 5, 5));
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+
+    for (let i = 0; i < result.size(); i++) {
+      const wrapper = result.at(i) as packer.Wrapper;
+      expect(result.fillRates[i].containableVolume).toBe(wrapper.getContainableVolume());
+    }
+  });
+
+  it("複数種類の Wrapper を使う場合でも fillRates が正しい", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(
+      new packer.Wrapper("大箱", 1000, 40, 40, 15, 0),
+      new packer.Wrapper("中箱", 700, 20, 20, 10, 0),
+      new packer.Wrapper("小箱", 500, 15, 15, 8, 0),
+    );
+
+    const instances = new packer.InstanceArray();
+    instances.insert(instances.end(), 15, new packer.Product("消しゴム", 1, 2, 5));
+    instances.insert(instances.end(), 15, new packer.Product("本", 15, 30, 3));
+    instances.insert(instances.end(), 15, new packer.Product("飲み物", 3, 3, 10));
+    instances.insert(instances.end(), 15, new packer.Product("傘", 5, 5, 20));
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+
+    expect(result.fillRates.length).toBe(result.size());
+
+    for (let i = 0; i < result.size(); i++) {
+      const wrapper = result.at(i) as packer.Wrapper;
+      const entry = result.fillRates[i];
+
+      expect(entry.name).toBe(wrapper.getName());
+      expect(entry.packedCount).toBe(wrapper.size());
+      expect(entry.fillRate).toBeGreaterThan(0);
+      expect(entry.fillRate).toBeLessThanOrEqual(1);
+    }
+  });
+
+  /**
+   * fillRate の数値正確性を検証する。
+   *
+   * 箱:   300 x 100 x 200 (W x H x D) → 体積 6,000,000
+   * 商品A: 200 x  30 x 100             → 体積   600,000
+   * 商品B: 300 x  20 x 100             → 体積   600,000
+   * 商品C:  50 x  10 x 300             → 体積   150,000
+   *                              合計体積 1,350,000
+   *
+   * 期待充填率 = 1,350,000 / 6,000,000 = 0.225
+   */
+  it("通常モード: 充填率の数値が正確である", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("箱", 1000, 300, 100, 200, 0));
+
+    const instances = new packer.InstanceArray();
+    instances.insert(instances.end(), 1, new packer.Product("商品A", 200, 30, 100));
+    instances.insert(instances.end(), 1, new packer.Product("商品B", 300, 20, 100));
+    instances.insert(instances.end(), 1, new packer.Product("商品C", 50, 10, 300));
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+
+    // 全商品が 1 箱に収まる
+    expect(result.size()).toBe(1);
+    expect((result.at(0) as packer.Wrapper).size()).toBe(3);
+
+    const entry = result.fillRates[0];
+    expect(entry.name).toBe("箱");
+    expect(entry.packedCount).toBe(3);
+    expect(entry.packedVolume).toBe(1_350_000);
+    expect(entry.containableVolume).toBe(6_000_000);
+    expect(entry.fillRate).toBeCloseTo(0.225, 10);
+  });
+
+  /**
+   * 安定モードでは安定性制約により 2 箱に分かれる。
+   *
+   * 箱1: 商品B (600,000) + 商品C (150,000) = 750,000
+   *   充填率 = 750,000 / 6,000,000 = 0.125
+   * 箱2: 商品A (600,000)
+   *   充填率 = 600,000 / 6,000,000 = 0.1
+   *
+   * 全箱の合計体積は通常モードと同じ 1,350,000。
+   */
+  it("安定モード: 充填率の数値が正確である", () => {
+    const wrappers = new packer.WrapperArray();
+    wrappers.push(new packer.Wrapper("箱", 1000, 300, 100, 200, 0, true));
+
+    const instances = new packer.InstanceArray();
+    instances.insert(instances.end(), 1, new packer.Product("商品A", 200, 30, 100));
+    instances.insert(instances.end(), 1, new packer.Product("商品B", 300, 20, 100));
+    instances.insert(instances.end(), 1, new packer.Product("商品C", 50, 10, 300));
+
+    const result = new packer.Packer(wrappers, instances).optimize();
+
+    // 安定性制約により 2 箱に分かれる
+    expect(result.size()).toBe(2);
+    for (let i = 0; i < result.size(); i++) {
+      expect((result.at(i) as packer.Wrapper).getStableMode()).toBe(true);
+    }
+
+    // 全商品が梱包されている
+    let totalPacked = 0;
+    let totalPackedVolume = 0;
+    for (let i = 0; i < result.size(); i++) {
+      totalPacked += result.fillRates[i].packedCount;
+      totalPackedVolume += result.fillRates[i].packedVolume;
+    }
+    expect(totalPacked).toBe(3);
+    expect(totalPackedVolume).toBe(1_350_000);
+
+    // 各箱の containableVolume は同一
+    for (const entry of result.fillRates) {
+      expect(entry.name).toBe("箱");
+      expect(entry.containableVolume).toBe(6_000_000);
+    }
+
+    // 箱1: 商品B + 商品C → 充填率 0.125
+    expect(result.fillRates[0].packedVolume).toBe(750_000);
+    expect(result.fillRates[0].packedCount).toBe(2);
+    expect(result.fillRates[0].fillRate).toBeCloseTo(0.125, 10);
+
+    // 箱2: 商品A → 充填率 0.1
+    expect(result.fillRates[1].packedVolume).toBe(600_000);
+    expect(result.fillRates[1].packedCount).toBe(1);
+    expect(result.fillRates[1].fillRate).toBeCloseTo(0.1, 10);
   });
 });
